@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>忘年会クイズ｜全体表示</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="display-body">
+  <main class="display-shell">
+    <div id="displayLobby" class="display-screen">
+      <div class="display-eyebrow">BONENKAI QUIZ</div>
+      <div class="display-icon">🍻</div>
+      <h1>忘年会クイズ</h1>
+      <p>まもなくスタート！</p>
+    </div>
+
+    <div id="displayQuestion" class="display-screen hidden">
+      <div class="display-question-meta">
+        <span id="displayQuestionNo">QUESTION 1 / 10</span>
+        <span id="displayAnswerCount">0 / 0</span>
+      </div>
+      <h1 id="displayQuestionText">問題</h1>
+      <div id="displayChoices" class="display-choices"></div>
+      <div id="displayQuestionStatus" class="display-status">回答受付中</div>
+    </div>
+
+    <div id="displayResult" class="display-screen hidden">
+      <div class="display-eyebrow">QUESTION RESULT</div>
+      <div id="displayResultQuestion" class="display-result-question">第1問</div>
+      <h1>結果発表</h1>
+      <div class="display-correct-label">正解</div>
+      <div id="displayCorrectAnswer" class="display-correct-answer">---</div>
+      <div id="displayResultStats" class="display-result-stats"></div>
+    </div>
+
+    <div id="displayFinal" class="display-screen hidden">
+      <div class="display-eyebrow">FINAL RESULT</div>
+      <div class="display-trophy">🏆</div>
+      <h1>最終結果</h1>
+      <div id="displayWinner"></div>
+      <div class="display-ranking-title">全員の結果</div>
+      <div id="displayRanking" class="display-ranking"></div>
+    </div>
+  </main>
+  <script type="module" src="display.js"></script>
+</body>
+</html>

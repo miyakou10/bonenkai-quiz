@@ -1,266 +1,55 @@
 <!doctype html>
 <html lang="ja">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>忘年会クイズ｜管理者</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>忘年会クイズ｜管理者</title>
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body class="admin-body">
-<main class="admin-shell">
-<header class="topbar">
-  <div>
-    <div class="eyebrow">BONENKAI QUIZ / ADMIN</div>
-    <h1>忘年会クイズ 管理者画面</h1>
-  </div>
-  <div class="room-pill">固定ルーム <strong>bonenkai</strong></div>
-</header>
-
-<section class="panel">
-  <div class="admin-head">
-    <div>
-      <span class="step">PARTICIPANTS</span>
-      <h2>参加者</h2>
-    </div>
-    <div class="count-box"><span id="participantCount">0</span>人</div>
-  </div>
-  <div id="participantList" class="participant-list empty">参加者を待っています…</div>
-</section>
-
-<section class="panel current-panel">
-  <div class="quiz-header">
-    <div>
-      <span class="step" id="questionNumber">LOBBY</span>
-      <h2 id="questionText">ゲーム開始待ち</h2>
-    </div>
-    <div class="timer-card">
-      <span>回答済み</span>
-      <strong id="answeredCount">0 / 0</strong>
-    </div>
-  </div>
-
-  <div id="currentChoices" class="host-choices"></div>
-
-  <div class="admin-actions">
-    <button id="startBtn" class="btn btn-primary">第1問を開始</button>
-    <button id="closeBtn" class="btn btn-accent" disabled>回答を締め切る</button>
-    <button id="nextBtn" class="btn btn-primary hidden">次の問題へ</button>
-  </div>
-</section>
-
-<section class="panel previous-panel">
-  <div class="section-heading">
-    <div>
-      <span class="step">PREVIOUS ANSWERS</span>
-      <h2>一つ前の問題の回答</h2>
-    </div>
-    <div id="previousQuestionLabel" class="muted">まだありません</div>
-  </div>
-  <div id="previousAnswers" class="previous-answers empty">
-    まだ回答データがありません
-  </div>
-</section>
-
-<footer class="admin-footer">
-  <span>Firebase Realtime Database</span>
-  <button id="resetBtn" class="text-button">ゲームをリセット</button>
-</footer>
-</main>
-
-<!-- Firebase設定はHTMLに直接記載 -->
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js";
-import {
-  getDatabase, ref, set, update, get, onValue, serverTimestamp, remove
-} from "https://www.gstatic.com/firebasejs/13.0.0/firebase-database.js";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyDfLVi-Pn-tpXql4-jq5SeyCSNZoB5i5d4",
-  authDomain: "bonenkai-quiz.firebaseapp.com",
-  databaseURL: "https://bonenkai-quiz-default-rtdb.firebaseio.com",
-  projectId: "bonenkai-quiz",
-  storageBucket: "bonenkai-quiz.firebasestorage.app",
-  messagingSenderId: "1098766456590",
-  appId: "1:1098766456590:web:6dd79790d75584c17c695f",
-  measurementId: "G-JG20V7J6CB"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
-
-const QUIZ_DATA = [
-  { question:"日本で一番高い山は？", choices:["富士山","北岳","奥穂高岳","槍ヶ岳"], answer:0 },
-  { question:"1年は通常何日？", choices:["360日","365日","366日","364日"], answer:1 },
-  { question:"ビールの原料として使われるものは？", choices:["ホップ","わさび","海苔","こんにゃく"], answer:0 },
-  { question:"「乾杯」の英語として最も一般的なのは？", choices:["Cheers!","Hello!","Thanks!","Good luck!"], answer:0 }
-];
-const TIME_LIMIT = 15;
-const ROOM = "bonenkai";
-const roomRef = ref(db, `rooms/${ROOM}`);
-
-const $ = id => document.getElementById(id);
-let roomData = null;
-let timer = null;
-
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
-}
-function participants() {
-  return Object.entries(roomData?.participants || {}).map(([id,p]) => ({id,...p}));
-}
-function renderParticipants() {
-  const ps = participants();
-  $("participantCount").textContent = ps.length;
-  if (!ps.length) {
-    $("participantList").className = "participant-list empty";
-    $("participantList").textContent = "参加者を待っています…";
-    return;
-  }
-  $("participantList").className = "participant-list";
-  $("participantList").innerHTML = ps.map(p =>
-    `<span class="participant-chip">👤 ${esc(p.name)}</span>`
-  ).join("");
-}
-function renderCurrent() {
-  const i = roomData?.currentQuestion ?? -1;
-  const q = roomData?.questions?.[i];
-
-  if (!q || roomData.status === "lobby") {
-    $("questionNumber").textContent = "LOBBY";
-    $("questionText").textContent = "ゲーム開始待ち";
-    $("currentChoices").innerHTML = "";
-    $("answeredCount").textContent = `0 / ${participants().length}`;
-    $("startBtn").classList.remove("hidden");
-    $("closeBtn").disabled = true;
-    $("nextBtn").classList.add("hidden");
-    return;
-  }
-
-  $("questionNumber").textContent = `QUESTION ${i+1} / ${roomData.questions.length}`;
-  $("questionText").textContent = q.question;
-  $("currentChoices").innerHTML = q.choices.map((c,n) =>
-    `<div class="host-choice ${roomData.revealed && n===q.answer ? "correct-choice":""}">
-      <span class="choice-letter">${String.fromCharCode(65+n)}</span><span>${esc(c)}</span>
-    </div>`
-  ).join("");
-
-  const answers = participants().filter(p => p.answers?.[i]);
-  $("answeredCount").textContent = `${answers.length} / ${participants().length}`;
-
-  $("startBtn").classList.add("hidden");
-  $("nextBtn").classList.toggle("hidden", !roomData.revealed || i >= roomData.questions.length-1);
-  $("closeBtn").disabled = roomData.revealed || answers.length === 0;
-
-  startTimer();
-}
-function startTimer() {
-  clearInterval(timer);
-  if (!roomData || roomData.status !== "question" || roomData.revealed || !roomData.questionStartedAt) return;
-  const started = roomData.questionStartedAt;
-  timer = setInterval(() => {
-    const remain = Math.max(0, TIME_LIMIT - (Date.now()-started)/1000);
-    if (remain <= 0) {
-      clearInterval(timer);
-      closeQuestion();
-    }
-  }, 100);
-}
-function renderPrevious() {
-  const i = roomData?.currentQuestion;
-  let prev = null;
-  if (roomData?.previousAnswers) prev = roomData.previousAnswers;
-  if (!prev || prev.questionIndex == null) {
-    $("previousQuestionLabel").textContent = "まだありません";
-    $("previousAnswers").className = "previous-answers empty";
-    $("previousAnswers").textContent = "まだ回答データがありません";
-    return;
-  }
-
-  const q = roomData.questions[prev.questionIndex];
-  $("previousQuestionLabel").textContent = `第${prev.questionIndex+1}問`;
-
-  const rows = Object.values(prev.answers || {});
-  if (!rows.length) {
-    $("previousAnswers").className = "previous-answers empty";
-    $("previousAnswers").textContent = "回答者はいませんでした";
-    return;
-  }
-
-  $("previousAnswers").className = "previous-answers";
-  $("previousAnswers").innerHTML = rows
-    .sort((a,b) => (a.elapsedMs ?? 999999) - (b.elapsedMs ?? 999999))
-    .map(a => `
-      <div class="previous-row">
-        <span class="prev-name">${esc(a.name)}</span>
-        <span class="prev-answer">${String.fromCharCode(65+a.choice)}：${esc(q.choices[a.choice])}</span>
-        <span class="${a.correct ? "ok":"ng"}">${a.correct ? "⭕ 正解":"❌ 不正解"}</span>
-        <strong>${a.elapsedMs != null ? (a.elapsedMs/1000).toFixed(2)+"秒" : "—"}</strong>
+  <main class="admin-shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">BONENKAI QUIZ / ADMIN</div>
+        <h1>忘年会クイズ 管理者画面</h1>
       </div>
-    `).join("");
-}
-async function ensureRoom() {
-  const snap = await get(roomRef);
-  if (!snap.exists()) {
-    await set(roomRef, {
-      status:"lobby", currentQuestion:-1, questionStartedAt:null,
-      revealed:false, questions:QUIZ_DATA, participants:{}, previousAnswers:null
-    });
-  } else {
-    await update(roomRef, {questions:QUIZ_DATA});
-  }
-}
-async function startGame() {
-  await update(roomRef, {
-    status:"question", currentQuestion:0,
-    questionStartedAt:serverTimestamp(), revealed:false
-  });
-}
-async function closeQuestion() {
-  if (!roomData || roomData.revealed || roomData.currentQuestion < 0) return;
-  const i = roomData.currentQuestion;
-  const q = roomData.questions[i];
-  const answerSnapshot = {};
-  participants().forEach(p => {
-    const a = p.answers?.[i];
-    if (a) answerSnapshot[p.id] = {
-      name:p.name, choice:a.choice, elapsedMs:a.elapsedMs,
-      correct:a.choice === q.answer
-    };
-  });
-  await update(roomRef, {
-    status:"result", revealed:true,
-    previousAnswers:{questionIndex:i, answers:answerSnapshot}
-  });
-}
-async function nextQuestion() {
-  const next = roomData.currentQuestion + 1;
-  if (next >= roomData.questions.length) return;
-  await update(roomRef, {
-    status:"question", currentQuestion:next,
-    questionStartedAt:serverTimestamp(), revealed:false
-  });
-}
-async function resetGame() {
-  if (!confirm("参加者・回答・進行状況をすべてリセットしますか？")) return;
-  await set(roomRef, {
-    status:"lobby", currentQuestion:-1, questionStartedAt:null,
-    revealed:false, questions:QUIZ_DATA, participants:{}, previousAnswers:null
-  });
-}
-
-$("startBtn").onclick = startGame;
-$("closeBtn").onclick = closeQuestion;
-$("nextBtn").onclick = nextQuestion;
-$("resetBtn").onclick = resetGame;
-
-await ensureRoom();
-onValue(roomRef, snap => {
-  roomData = snap.val();
-  if (!roomData) return;
-  renderParticipants();
-  renderCurrent();
-  renderPrevious();
-});
-</script>
+    </header>
+    <section class="panel">
+      <div class="admin-head">
+        <div><span class="step">PARTICIPANTS</span>
+          <h2>参加者</h2>
+        </div>
+        <div class="count-box"><span id="participantCount">0</span>人</div>
+      </div>
+      <div id="participantList" class="participant-list empty">参加者を待っています…</div>
+    </section>
+    <section class="panel current-panel">
+      <div class="quiz-header">
+        <div><span class="step" id="questionNumber">LOBBY</span>
+          <h2 id="questionText">ゲーム開始待ち</h2>
+        </div>
+        <span id="timer"></span>
+        <div class="timer-card"><span>回答済み</span><strong id="answeredCount">0 / 0</strong></div>
+      </div>
+      <div id="currentChoices" class="host-choices"></div>
+      <div class="admin-actions"><button id="startBtn" class="btn btn-primary">第1問を開始</button>
+        <button id="nextBtn" class="btn btn-primary hidden">次の問題へ</button>
+        <button id="finalBtn" class="btn btn-primary hidden">最終結果を表示</button>
+      </div>
+    </section>
+    <section id="finalPanel" class="panel final-panel hidden">
+      <div class="section-heading">
+        <div><span class="step">FINAL RESULT</span>
+          <h2>総合結果</h2>
+        </div>
+      </div>
+      <div id="finalResults"></div>
+    </section>
+    <footer class="admin-footer"><button id="resetBtn" class="text-button">ゲームをリセット</button></footer>
+  </main>
+  <script type="module" src="admin.js"></script>
 </body>
+
 </html>
