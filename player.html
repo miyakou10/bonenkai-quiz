@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>忘年会クイズ｜参加</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="player-body">
+<main class="player-shell">
+<header class="player-topbar">
+  <span class="eyebrow">BONENKAI QUIZ</span>
+  <span class="room-pill">参加者</span>
+</header>
+
+<section id="joinScreen" class="player-screen">
+  <div class="hero-icon">🎉</div>
+  <h1>忘年会クイズ</h1>
+  <p class="lead">ニックネームを入力して参加してください。</p>
+  <input id="nickname" class="text-input" maxlength="12" placeholder="例：たろう" autocomplete="off">
+  <button id="joinBtn" class="btn btn-primary btn-large">参加する</button>
+  <p id="joinError" class="error"></p>
+</section>
+
+<section id="waitingScreen" class="player-screen hidden">
+  <div class="waiting-animation">🍻</div>
+  <h2>参加しました！</h2>
+  <p><strong id="playerName"></strong> さん</p>
+  <p class="muted">幹事が問題を開始するまで<br>この画面で待ってください。</p>
+</section>
+
+<section id="questionScreen" class="player-screen hidden">
+  <div class="player-question-meta">
+    <span id="questionNo">Q1</span><span id="timer">--</span>
+  </div>
+  <h2 id="question">問題</h2>
+  <div id="choices" class="player-choices"></div>
+  <p id="answerState" class="answer-state"></p>
+</section>
+
+<section id="resultScreen" class="player-screen hidden">
+  <div id="resultIcon" class="result-icon">🎊</div>
+  <h2 id="resultTitle">結果</h2>
+  <div id="resultDetail" class="player-result-detail"></div>
+  <p class="muted">次の問題を待っています…</p>
+</section>
+</main>
+
+<!-- Firebase設定はHTMLに直接記載 -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js";
+import {
+  getDatabase, ref, set, update, get, onValue, push, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/13.0.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDfLVi-Pn-tpXql4-jq5SeyCSNZoB5i5d4",
+  authDomain: "bonenkai-quiz.firebaseapp.com",
+  databaseURL: "https://bonenkai-quiz-default-rtdb.firebaseio.com",
+  projectId: "bonenkai-quiz",
+  storageBucket: "bonenkai-quiz.firebasestorage.app",
+  messagingSenderId: "1098766456590",
+  appId: "1:1098766456590:web:6dd79790d75584c17c695f",
+  measurementId: "G-JG20V7J6CB"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+const ROOM = "bonenkai";
+const TIME_LIMIT = 15;
+const roomRef = ref(db, `rooms/${ROOM}`);
+const $ = id => document.getElementById(id);
+
+let roomData = null;
+let playerId = localStorage.getItem("bonenkai_player_id");
+let playerName = localStorage.getItem("bonenkai_player_name");
+let localStart = 0;
+let lastQuestion = -1;
+let timer = null;
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
+}
+function show(id) {
+  ["joinScreen","waitingScreen","questionScreen","resultScreen"].forEach(x => $(x).classList.add("hidden"));
+  $(id).classList.remove("hidden");
+}
+async function join() {
+  const name = $("nickname").value.trim();
+  if (!name) {
+    $("joinError").textContent = "ニックネームを入力してください。";
+    return;
+  }
+  const snap = await get(roomRef);
+  if (!snap.exists()) {
+    $("joinError").textContent = "ゲームが見つかりません。";
+    return;
+  }
+  roomData = snap.val();
+
+  if (playerId && roomData.participants?.[playerId]) {
+    await update(ref(db, `rooms/${ROOM}/participants/${playerId}`), {name});
+  } else {
+    const p = push(ref(db, `rooms/${ROOM}/participants`));
+    playerId = p.key;
+    await set(p, {name, joinedAt:serverTimestamp(), answers:{}});
+    localStorage.setItem("bonenkai_player_id", playerId);
+  }
+  playerName = name;
+  localStorage.setItem("bonenkai_player_name", name);
+  $("playerName").textContent = name;
+  $("joinError").textContent = "";
+}
+function renderQuestion() {
+  const i = roomData.currentQuestion;
+  const q = roomData.questions[i];
+  const my = roomData.participants?.[playerId]?.answers?.[i];
+  const already = !!my;
+
+  $("questionNo").textContent = `Q${i+1} / ${roomData.questions.length}`;
+  $("question").textContent = q.question;
+  $("choices").innerHTML = q.choices.map((c,n) =>
+    `<button class="player-choice" data-i="${n}" ${already ? "disabled":""}>
+      <span class="choice-letter">${String.fromCharCode(65+n)}</span><span>${esc(c)}</span>
+    </button>`
+  ).join("");
+
+  document.querySelectorAll(".player-choice").forEach(b => {
+    b.onclick = () => answer(Number(b.dataset.i));
+  });
+
+  if (!already || lastQuestion !== i) {
+    localStart = Date.now();
+    lastQuestion = i;
+  }
+  $("answerState").textContent = already ? "回答済みです" : "答えをタップしてください";
+  startTimer(already);
+}
+function startTimer(already) {
+  clearInterval(timer);
+  if (already || roomData.revealed) {
+    $("timer").textContent = already ? "回答済み" : "終了";
+    return;
+  }
+  timer = setInterval(() => {
+    const remain = Math.max(0, TIME_LIMIT-(Date.now()-localStart)/1000);
+    $("timer").textContent = `${remain.toFixed(1)}s`;
+    if (remain <= 0) {
+      clearInterval(timer);
+      document.querySelectorAll(".player-choice").forEach(b => b.disabled=true);
+      $("answerState").textContent = "時間切れ";
+    }
+  }, 100);
+}
+async function answer(choice) {
+  if (roomData.revealed) return;
+  const i = roomData.currentQuestion;
+  const existing = roomData.participants?.[playerId]?.answers?.[i];
+  if (existing) return;
+
+  const elapsedMs = Math.round(Date.now()-localStart);
+  document.querySelectorAll(".player-choice").forEach(b => b.disabled=true);
+  $("answerState").textContent = "回答を送信しました！";
+  $("timer").textContent = `${(elapsedMs/1000).toFixed(2)}s`;
+
+  await update(ref(db, `rooms/${ROOM}/participants/${playerId}/answers/${i}`), {
+    choice, elapsedMs, answeredAt:serverTimestamp()
+  });
+}
+function renderResult() {
+  const i = roomData.currentQuestion;
+  const q = roomData.questions[i];
+  const a = roomData.participants?.[playerId]?.answers?.[i];
+
+  if (!a) {
+    $("resultIcon").textContent = "⏰";
+    $("resultTitle").textContent = "時間切れ";
+    $("resultDetail").innerHTML = `<p>今回は回答できませんでした。</p><p>正解：<strong>${esc(q.choices[q.answer])}</strong></p>`;
+    return;
+  }
+  const ok = a.choice === q.answer;
+  $("resultIcon").textContent = ok ? "🎉" : "😵";
+  $("resultTitle").textContent = ok ? "正解！" : "残念…";
+  $("resultDetail").innerHTML =
+    `<p>あなたの回答：${esc(q.choices[a.choice])}</p>
+     <p>正解：<strong>${esc(q.choices[q.answer])}</strong></p>
+     <div class="big-time">${(a.elapsedMs/1000).toFixed(2)}秒</div>`;
+}
+
+$("joinBtn").onclick = join;
+$("nickname").onkeydown = e => { if (e.key === "Enter") join(); };
+if (playerName) $("nickname").value = playerName;
+
+onValue(roomRef, snap => {
+  roomData = snap.val();
+  if (!roomData) return;
+
+  const me = roomData.participants?.[playerId];
+  if (!me) {
+    show("joinScreen");
+    return;
+  }
+  $("playerName").textContent = me.name;
+
+  if (roomData.status === "lobby") show("waitingScreen");
+  else if (roomData.status === "question") {
+    show("questionScreen");
+    renderQuestion();
+  } else if (roomData.status === "result") {
+    show("resultScreen");
+    renderResult();
+  }
+});
+</script>
+</body>
+</html>
