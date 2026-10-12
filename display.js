@@ -383,57 +383,43 @@ function getPreviousQuestionResult() {
         question.choices[question.answer],
       correctCount: 0,
       totalCount: totalParticipants,
-      fastestParticipants: [],
-      slowestParticipants: [],
-      fastestTime: null,
-      slowestTime: null,
+      topThreeCorrectParticipants: [],
     };
   }
 
   /* -----------------------------------------
-     最速・最遅の時間
+     正解者だけを回答時間の速い順に並べる
   ----------------------------------------- */
 
-  const fastestTime =
-    Math.min(
-      ...answers.map(
-        (answer) =>
-          answer.elapsedMs ?? Infinity,
-      ),
-    );
-
-  const slowestTime =
-    Math.max(
-      ...answers.map(
-        (answer) =>
-          answer.elapsedMs ?? -Infinity,
-      ),
+  const correctAnswers = answers
+    .filter(
+      (answer) =>
+        answer.correct === true ||
+        answer.choice === question.answer,
+    )
+    .filter(
+      (answer) =>
+        Number.isFinite(Number(answer.elapsedMs)),
+    )
+    .sort(
+      (answerA, answerB) =>
+        Number(answerA.elapsedMs) -
+        Number(answerB.elapsedMs),
     );
 
   /* -----------------------------------------
-     最速・最遅の参加者
+     トップ3：正解者を回答時間順に表示
+     3位のタイムが同じ場合は同率者も含める
   ----------------------------------------- */
 
-  const fastestParticipants =
-    answers.filter(
-      (answer) =>
-        answer.elapsedMs === fastestTime,
-    );
+  const topThreeCorrectParticipants =
+    correctAnswers.filter((answer, index, sortedAnswers) => {
+      if (index < 3) return true;
+      return Number(answer.elapsedMs) ===
+        Number(sortedAnswers[2]?.elapsedMs);
+    });
 
-  const slowestParticipants =
-    answers.filter(
-      (answer) =>
-        answer.elapsedMs === slowestTime,
-    );
-
-  /* -----------------------------------------
-     正解者数
-  ----------------------------------------- */
-
-  const correctCount =
-    answers.filter(
-      (answer) => answer.correct,
-    ).length;
+  const correctCount = correctAnswers.length;
 
   return {
     questionIndex,
@@ -441,59 +427,44 @@ function getPreviousQuestionResult() {
       question.choices[question.answer],
     correctCount,
     totalCount: totalParticipants,
-    fastestParticipants,
-    slowestParticipants,
-    fastestTime,
-    slowestTime,
+    topThreeCorrectParticipants,
   };
 }
 
 /**
- * 参加者名を
- * 「Aさん・Bさん」のような文字列にする
+ * 正解者トップ3（回答時間順）のHTMLを作る
  */
-function createParticipantNamesHtml(
-  participants,
-) {
-  return participants
-    .map((participant) =>
-      escapeHtml(participant.name),
-    )
-    .join("・");
-}
-
-/**
- * 最速・最遅の表示HTMLを作る
- */
-function createSpeedResultHtml(
-  label,
-  emoji,
-  participants,
-  timeMs,
-) {
-  if (
-    !participants.length ||
-    timeMs == null
-  ) {
-    return "";
+function createTopThreeHtml(participants) {
+  if (!participants.length) {
+    return `
+      <div class="display-top-three">
+        <h2>🏆 正解者トップ3</h2>
+        <p class="display-top-three-empty">正解者はいません</p>
+      </div>
+    `;
   }
 
-  const participantNames =
-    createParticipantNamesHtml(
-      participants,
-    );
+  const rows = participants.map((participant, index) => {
+    const timeSeconds =
+      (Number(participant.elapsedMs) / 1000).toFixed(2);
+    const rank = index > 0 &&
+      Number(participant.elapsedMs) === Number(participants[index - 1].elapsedMs)
+      ? "同率"
+      : `${index + 1}位`;
 
-  const seconds =
-    (timeMs / 1000).toFixed(2);
+    return `
+      <div class="display-top-three-row">
+        <span class="display-top-three-rank">${rank}</span>
+        <strong>${escapeHtml(participant.name + " さん" || "参加者")}</strong>
+        <span class="display-top-three-time">${timeSeconds}秒</span>
+      </div>
+    `;
+  }).join("");
 
   return `
-    <div class="display-result-stat">
-      <span>${emoji} ${label}</span>
-
-      <strong>
-        ${participantNames}
-        <small>${seconds}秒</small>
-      </strong>
+    <div class="display-top-three">
+      <h2>🏆 正解者トップ3</h2>
+      ${rows}
     </div>
   `;
 }
@@ -527,27 +498,12 @@ function renderResultScreen() {
     result.correctAnswer;
 
   /* -----------------------------------------
-     最速
+     正解者トップ3
   ----------------------------------------- */
 
-  const fastestHtml =
-    createSpeedResultHtml(
-      "最速",
-      "⚡",
-      result.fastestParticipants,
-      result.fastestTime,
-    );
-
-  /* -----------------------------------------
-     最遅
-  ----------------------------------------- */
-
-  const slowestHtml =
-    createSpeedResultHtml(
-      "最遅",
-      "🐢",
-      result.slowestParticipants,
-      result.slowestTime,
+  const topThreeHtml =
+    createTopThreeHtml(
+      result.topThreeCorrectParticipants || [],
     );
 
   /* -----------------------------------------
@@ -562,12 +518,10 @@ function renderResultScreen() {
       ${result.totalCount}人
     </div>
 
-    ${fastestHtml}
-
-    ${slowestHtml}
+    ${topThreeHtml}
 
     <div class="display-result-note">
-      ※ 最速・最遅が同率の場合は全員表示
+      ※ トップ3は正解者を回答時間の速い順に表示。3位が同タイムの場合、同率者も表示。
     </div>
   `;
 }
@@ -674,13 +628,10 @@ function calculateFinalRanking() {
       }
 
       /* -----------------------------------
-         ③ 正解数が多い順
+         ③ 正答率・総回答時間が同じ場合は同順位
       ----------------------------------- */
 
-      return (
-        participantB.correctCount -
-        participantA.correctCount
-      );
+      return 0;
     },
   );
 
@@ -688,53 +639,49 @@ function calculateFinalRanking() {
 }
 
 /**
- * 優勝者カードのHTMLを作る
+ * 最終結果トップ3のHTMLを作る
+ * 正答率が高い順、同率なら総回答時間が短い順。
+ * 3位と同じ成績の参加者がいれば、全員表示する。
  */
-function createWinnerHtml(
-  winner,
-  totalQuestions,
-) {
-  const accuracyPercent =
-    (winner.accuracy * 100).toFixed(0);
+function createFinalTopThreeHtml(ranking, totalQuestions) {
+  if (!ranking.length) {
+    return "<p>参加者はいません。</p>";
+  }
 
-  const totalAnswerSeconds =
-    (
-      winner.totalAnswerTime / 1000
-    ).toFixed(2);
+  const topThree = ranking.filter((participant, index) => {
+    if (index < 3) return true;
+    const third = ranking[2];
+    return third &&
+      participant.accuracy === third.accuracy &&
+      participant.totalAnswerTime === third.totalAnswerTime;
+  });
+
+  const rows = topThree.map((participant, index) => {
+    const previous = ranking[index - 1];
+    const sameAsPrevious = previous &&
+      participant.accuracy === previous.accuracy &&
+      participant.totalAnswerTime === previous.totalAnswerTime;
+    const rank = sameAsPrevious ? `${index}位（同率）` : `${index + 1}位`;
+    const accuracyPercent = (participant.accuracy * 100).toFixed(0);
+    const totalAnswerSeconds = (participant.totalAnswerTime / 1000).toFixed(2);
+
+    return `
+      <div class="display-final-top-three-row">
+        <span class="display-final-top-three-rank">${rank}</span>
+        <strong>${escapeHtml(participant.name)} さん</strong>
+        <span class="display-final-top-three-stats">
+          正答率 ${accuracyPercent}%（${participant.correctCount}/${totalQuestions}問）
+          <span>合計 ${totalAnswerSeconds}秒</span>
+        </span>
+      </div>
+    `;
+  }).join("");
 
   return `
-    <div class="display-winner-card">
-
-      <div class="display-winner-label">
-        WINNER
-      </div>
-
-      <div class="display-winner-name">
-        ${escapeHtml(winner.name)} さん
-      </div>
-
-      <div class="display-winner-stats">
-        正答率
-        <strong>
-          ${accuracyPercent}%
-        </strong>
-
-        ・
-
-        正解
-        <strong>
-          ${winner.correctCount}/${totalQuestions}問
-        </strong>
-
-        ・
-
-        総回答時間
-        <strong>
-          ${totalAnswerSeconds}秒
-        </strong>
-      </div>
-
-    </div>
+    <section class="display-final-top-three">
+      <h2>🏆 総合トップ3</h2>
+      ${rows}
+    </section>
   `;
 }
 
@@ -806,18 +753,16 @@ function renderFinalScreen() {
     return;
   }
 
-  const winner = ranking[0];
-
   const totalQuestions =
     roomData.questions.length;
 
   /* -----------------------------------------
-     優勝者
+     総合トップ3
   ----------------------------------------- */
 
   elements.winner.innerHTML =
-    createWinnerHtml(
-      winner,
+    createFinalTopThreeHtml(
+      ranking,
       totalQuestions,
     );
 
@@ -829,8 +774,13 @@ function renderFinalScreen() {
     ranking
       .map(
         (participant, index) => {
-          const rankingPosition =
-            index + 1;
+          const previous = ranking[index - 1];
+          const sameAsPrevious = previous &&
+            participant.accuracy === previous.accuracy &&
+            participant.totalAnswerTime === previous.totalAnswerTime;
+          const rankingPosition = sameAsPrevious
+            ? index
+            : index + 1;
 
           return createRankingRowHtml(
             participant,

@@ -34,7 +34,9 @@
         <div class="timer-card"><span>回答済み</span><strong id="answeredCount">0 / 0</strong></div>
       </div>
       <div id="currentChoices" class="host-choices"></div>
-      <div class="admin-actions"><button id="startBtn" class="btn btn-primary">第1問を開始</button>
+      <div id="resultPreview" class="result-preview hidden" aria-live="polite"></div>
+      <div class="admin-actions">
+        <button id="resultBtn" class="btn btn-primary hidden">結果を表示</button><button id="startBtn" class="btn btn-primary">第1問を開始</button>
         <button id="nextBtn" class="btn btn-primary hidden">次の問題へ</button>
         <button id="finalBtn" class="btn btn-primary hidden">最終結果を表示</button>
       </div>

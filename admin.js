@@ -62,6 +62,8 @@ const elements = {
   startButton: document.getElementById("startBtn"),
   nextButton: document.getElementById("nextBtn"),
   finalButton: document.getElementById("finalBtn"),
+  resultButton: document.getElementById("resultBtn"),
+  resultPreview: document.getElementById("resultPreview"),
   resetButton: document.getElementById("resetBtn"),
 
   finalPanel: document.getElementById("finalPanel"),
@@ -268,7 +270,14 @@ function renderQuestionScreen() {
  * 問題画面のボタン状態を更新する
  */
 function updateQuestionButtons(questionIndex, answeredCount) {
-  const questionIsFinished = roomData.revealed;
+  const questionIsFinished = roomData.status === "result" && roomData.revealed;
+  const canRevealResult = roomData.status === "result_ready";
+
+  if (canRevealResult) {
+    showElement(elements.resultButton);
+  } else {
+    hideElement(elements.resultButton);
+  }
 
   // ゲーム開始ボタン
   hideElement(elements.startButton);
@@ -311,6 +320,8 @@ function renderLobbyScreen() {
 
   hideElement(elements.nextButton);
   hideElement(elements.finalButton);
+  hideElement(elements.resultButton);
+  hideElement(elements.resultPreview);
 }
 
 /* =========================================================
@@ -331,6 +342,38 @@ function renderFinishedScreen() {
   hideElement(elements.startButton);
   hideElement(elements.nextButton);
   hideElement(elements.finalButton);
+}
+
+/**
+ * 結果発表前に、管理者だけが暫定トップを確認できるようにする。
+ * 1問の正解者のうち、回答時間が最短の参加者を表示する。
+ */
+function renderResultPreview() {
+  const questionIndex = roomData.currentQuestion;
+  const question = roomData.questions?.[questionIndex];
+  if (!question || roomData.status !== "result_ready") {
+    hideElement(elements.resultPreview);
+    elements.resultPreview.textContent = "";
+    return;
+  }
+
+  const correctAnswers = getParticipants()
+    .map((participant) => ({
+      name: participant.name,
+      answer: participant.answers?.[questionIndex],
+    }))
+    .filter(({ answer }) => answer && answer.choice === question.answer)
+    .sort((a, b) => Number(a.answer.elapsedMs || 0) - Number(b.answer.elapsedMs || 0));
+
+  showElement(elements.resultPreview);
+  if (!correctAnswers.length) {
+    elements.resultPreview.textContent = "暫定トップ：正解者なし";
+    return;
+  }
+
+  const bestTime = Number(correctAnswers[0].answer.elapsedMs || 0);
+  const leaders = correctAnswers.filter(({ answer }) => Number(answer.elapsedMs || 0) === bestTime);
+  elements.resultPreview.textContent = `今回の問題トップ：${leaders.map(({ name }) => name)} さん／ ${(bestTime / 1000).toFixed(2)}秒`;
 }
 
 /* =========================================================
@@ -375,7 +418,7 @@ function startQuestionTimer() {
 
     if (elapsedSeconds >= TIME_LIMIT_SECONDS) {
       stopQuestionTimer();
-      closeCurrentQuestion();
+      markQuestionResultReady();
       elements.timer.textContent = '';
     }
   }, 100);
@@ -608,6 +651,14 @@ async function startGame() {
 }
 
 /**
+ * 制限時間終了。正解はまだ公開せず、管理者の発表操作を待つ。
+ */
+async function markQuestionResultReady() {
+  if (!roomData || roomData.status !== "question") return;
+  await update(roomReference, { status: "result_ready", revealed: false });
+}
+
+/**
  * 現在の問題を終了する
  */
 async function closeCurrentQuestion() {
@@ -711,6 +762,7 @@ async function resetGame() {
 elements.startButton.addEventListener("click", startGame);
 
 elements.nextButton.addEventListener("click", goToNextQuestion);
+elements.resultButton.addEventListener("click", closeCurrentQuestion);
 
 elements.finalButton.addEventListener("click", showFinalResults);
 
@@ -736,17 +788,28 @@ function renderAdminScreen() {
 
     case "question":
       hideElement(elements.finalPanel);
+      hideElement(elements.resultPreview);
       renderQuestionScreen();
       startQuestionTimer();
+      break;
+
+    case "result_ready":
+      stopQuestionTimer();
+      hideElement(elements.finalPanel);
+      renderQuestionScreen();
+      renderResultPreview();
       break;
 
     case "result":
       stopQuestionTimer();
       hideElement(elements.finalPanel);
+      hideElement(elements.resultPreview);
       renderQuestionScreen();
       break;
 
     case "final":
+      hideElement(elements.resultButton);
+      hideElement(elements.resultPreview);
       renderFinishedScreen();
       renderFinalResults();
       break;
